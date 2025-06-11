@@ -62,13 +62,19 @@ exports.getBinanceStatus = async (req, res) => {
 
     const user = await User.findOne({ userId });
 
-    if (!user || !user.binanceApiKey || !user.binanceApiSecret) {
+    if (
+      !user ||
+      !user.binanceApiKey ||
+      !user.binanceApiSecret ||
+      user.binanceApiKey === null ||
+      user.binanceApiSecret === null
+    ) {
       return res.json({ connected: false });
     }
 
     res.json({ connected: true });
   } catch (err) {
-    console.error("Error in getBinanceStatus:", err);
+    console.error("Binance status check error:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 };
