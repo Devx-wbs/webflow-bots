@@ -96,3 +96,46 @@ exports.disconnectBinance = async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 };
+
+
+exports.getWalletInfo = async (req, res) => {
+  try {
+    const { userId } = req.query;
+    if (!userId) return res.status(400).json({ error: "Missing userId" });
+
+    const user = await User.findOne({ userId });
+    if (!user || !user.binanceApiKey || !user.binanceApiSecret) {
+      return res.status(403).json({ error: "Binance not connected" });
+    }
+
+    const apiKey = decrypt(user.binanceApiKey);
+    const apiSecret = decrypt(user.binanceApiSecret);
+
+    const timestamp = Date.now();
+    const queryString = `timestamp=${timestamp}`;
+    const signature = crypto
+      .createHmac("sha256", apiSecret)
+      .update(queryString)
+      .digest("hex");
+
+    const response = await axios.get(
+      `https://api.binance.com/api/v3/account?${queryString}&signature=${signature}`,
+      { headers: { "X-MBX-APIKEY": apiKey } }
+    );
+
+    const balances = response.data.balances
+      .filter(
+        (asset) => parseFloat(asset.free) > 0 || parseFloat(asset.locked) > 0
+      )
+      .map((asset) => ({
+        asset: asset.asset,
+        free: asset.free,
+        locked: asset.locked,
+      }));
+
+    return res.json({ balances });
+  } catch (err) {
+    console.error("Wallet fetch error:", err.response?.data || err.message);
+    res.status(500).json({ error: "Failed to fetch wallet balances" });
+  }
+};
