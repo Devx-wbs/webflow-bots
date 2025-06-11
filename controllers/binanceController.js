@@ -51,3 +51,42 @@ exports.connectBinance = async (req, res) => {
       .json({ success: false, error: "Invalid Binance API key or secret" });
   }
 };
+
+exports.getBinanceStatus = async (req, res) => {
+  try {
+    const { userId } = req.query;
+
+    if (!userId)
+      return res
+        .status(400)
+        .json({ connected: false, message: "Missing userId" });
+
+    const user = await User.findOne({ userId });
+    if (!user || !user.binanceApiKey || !user.binanceApiSecret) {
+      return res.status(200).json({ connected: false });
+    }
+
+    return res.status(200).json({ connected: true });
+  } catch (err) {
+    console.error("Error checking Binance status:", err);
+    res.status(500).json({ connected: false, error: "Server error" });
+  }
+};
+
+exports.disconnectBinance = async (req, res) => {
+  try {
+    const { userId } = req.body;
+
+    if (!userId) return res.status(400).json({ error: "Missing userId" });
+
+    await User.findOneAndUpdate(
+      { userId },
+      { binanceApiKey: null, binanceApiSecret: null }
+    );
+
+    res.status(200).json({ message: "Binance disconnected" });
+  } catch (err) {
+    console.error("Error disconnecting Binance:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
