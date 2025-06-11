@@ -1,34 +1,31 @@
 const axios = require("axios");
 const crypto = require("crypto");
 const User = require("../models/User");
-const { encrypt } = require("../utils/encrypt");
+const { encrypt, decrypt } = require("../utils/encrypt");
 
+// Helper to sign Binance API requests
+const signQuery = (query, secret) =>
+  crypto.createHmac("sha256", secret).update(query).digest("hex");
+
+// ✅ Connect Binance API
 exports.connectBinance = async (req, res) => {
   try {
     const { userId, apiKey, apiSecret } = req.body;
-
     if (!userId || !apiKey || !apiSecret) {
-      return res
-        .status(400)
-        .json({ success: false, error: "Missing required fields" });
+      return res.status(400).json({ success: false, error: "Missing fields" });
     }
 
-    // Step 1: Verify API credentials with Binance
+    // Verify credentials
     const timestamp = Date.now();
-    const queryString = `timestamp=${timestamp}`;
-    const signature = crypto
-      .createHmac("sha256", apiSecret)
-      .update(queryString)
-      .digest("hex");
+    const query = `timestamp=${timestamp}`;
+    const signature = signQuery(query, apiSecret);
 
-    const binanceResponse = await axios.get(
-      `https://api.binance.com/api/v3/account?${queryString}&signature=${signature}`,
-      {
-        headers: { "X-MBX-APIKEY": apiKey },
-      }
+    const test = await axios.get(
+      `https://api.binance.com/api/v3/account?${query}&signature=${signature}`,
+      { headers: { "X-MBX-APIKEY": apiKey } }
     );
 
-    // Step 2: Save encrypted credentials in DB only if connection works
+    // Save encrypted keys
     const encryptedKey = encrypt(apiKey);
     const encryptedSecret = encrypt(apiSecret);
 
@@ -38,51 +35,37 @@ exports.connectBinance = async (req, res) => {
       { upsert: true, new: true }
     );
 
-    return res
-      .status(200)
-      .json({ success: true, message: "Binance API connected successfully" });
+    return res.json({ success: true, message: "Binance connected" });
   } catch (err) {
-    console.error(
-      "Binance connection error:",
-      err.response?.data || err.message
-    );
+    console.error("Connect error:", err?.response?.data || err.message);
     return res
       .status(400)
-      .json({ success: false, error: "Invalid Binance API key or secret" });
+      .json({ success: false, error: "Invalid API key or secret" });
   }
 };
 
+// ✅ Check if Binance is connected
 exports.getBinanceStatus = async (req, res) => {
   try {
-    const userId = req.query.userId;
-
-    if (!userId) {
-      return res.status(400).json({ error: "Missing userId" });
-    }
+    const { userId } = req.query;
+    if (!userId) return res.status(400).json({ error: "Missing userId" });
 
     const user = await User.findOne({ userId });
-
-    if (
-      !user ||
-      !user.binanceApiKey ||
-      !user.binanceApiSecret ||
-      user.binanceApiKey === null ||
-      user.binanceApiSecret === null
-    ) {
+    if (!user?.binanceApiKey || !user?.binanceApiSecret) {
       return res.json({ connected: false });
     }
 
-    res.json({ connected: true });
+    return res.json({ connected: true });
   } catch (err) {
-    console.error("Binance status check error:", err);
-    res.status(500).json({ error: "Internal server error" });
+    console.error("Status error:", err.message);
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
 
+// ✅ Disconnect Binance
 exports.disconnectBinance = async (req, res) => {
   try {
     const { userId } = req.body;
-
     if (!userId) return res.status(400).json({ error: "Missing userId" });
 
     await User.findOneAndUpdate(
@@ -90,52 +73,75 @@ exports.disconnectBinance = async (req, res) => {
       { binanceApiKey: null, binanceApiSecret: null }
     );
 
-    res.status(200).json({ message: "Binance disconnected" });
+    return res.json({ message: "Binance disconnected" });
   } catch (err) {
-    console.error("Error disconnecting Binance:", err);
-    res.status(500).json({ error: "Internal server error" });
+    console.error("Disconnect error:", err.message);
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
 
-
+// ✅ Wallet info
 exports.getWalletInfo = async (req, res) => {
   try {
     const { userId } = req.query;
     if (!userId) return res.status(400).json({ error: "Missing userId" });
 
     const user = await User.findOne({ userId });
-    if (!user || !user.binanceApiKey || !user.binanceApiSecret) {
+    if (!user?.binanceApiKey || !user?.binanceApiSecret) {
       return res.status(403).json({ error: "Binance not connected" });
     }
 
     const apiKey = decrypt(user.binanceApiKey);
     const apiSecret = decrypt(user.binanceApiSecret);
-
     const timestamp = Date.now();
-    const queryString = `timestamp=${timestamp}`;
-    const signature = crypto
-      .createHmac("sha256", apiSecret)
-      .update(queryString)
-      .digest("hex");
+    const query = `timestamp=${timestamp}`;
+    const signature = signQuery(query, apiSecret);
 
-    const response = await axios.get(
-      `https://api.binance.com/api/v3/account?${queryString}&signature=${signature}`,
+    const accountRes = await axios.get(
+      `https://api.binance.com/api/v3/account?${query}&signature=${signature}`,
       { headers: { "X-MBX-APIKEY": apiKey } }
     );
 
-    const balances = response.data.balances
-      .filter(
-        (asset) => parseFloat(asset.free) > 0 || parseFloat(asset.locked) > 0
-      )
-      .map((asset) => ({
-        asset: asset.asset,
-        free: asset.free,
-        locked: asset.locked,
+    const balances = accountRes.data.balances
+      .filter((b) => parseFloat(b.free) > 0 || parseFloat(b.locked) > 0)
+      .map((b) => ({
+        asset: b.asset,
+        free: parseFloat(b.free),
+        locked: parseFloat(b.locked),
       }));
 
     return res.json({ balances });
   } catch (err) {
-    console.error("Wallet fetch error:", err.response?.data || err.message);
-    res.status(500).json({ error: "Failed to fetch wallet balances" });
+    console.error("Wallet error:", err?.response?.data || err.message);
+    return res.status(500).json({ error: "Failed to fetch wallet info" });
+  }
+};
+
+// ✅ Basic trade history (last 10)
+exports.getTradeHistory = async (req, res) => {
+  try {
+    const { userId, symbol = "BTCUSDT" } = req.query;
+    if (!userId) return res.status(400).json({ error: "Missing userId" });
+
+    const user = await User.findOne({ userId });
+    if (!user?.binanceApiKey || !user?.binanceApiSecret) {
+      return res.status(403).json({ error: "Binance not connected" });
+    }
+
+    const apiKey = decrypt(user.binanceApiKey);
+    const apiSecret = decrypt(user.binanceApiSecret);
+    const timestamp = Date.now();
+    const query = `symbol=${symbol}&limit=10&timestamp=${timestamp}`;
+    const signature = signQuery(query, apiSecret);
+
+    const response = await axios.get(
+      `https://api.binance.com/api/v3/myTrades?${query}&signature=${signature}`,
+      { headers: { "X-MBX-APIKEY": apiKey } }
+    );
+
+    return res.json({ trades: response.data });
+  } catch (err) {
+    console.error("Trade history error:", err?.response?.data || err.message);
+    return res.status(500).json({ error: "Failed to fetch trade history" });
   }
 };
