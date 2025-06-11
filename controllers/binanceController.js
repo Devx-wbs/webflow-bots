@@ -54,7 +54,7 @@ exports.connectBinance = async (req, res) => {
 
 exports.getBinanceStatus = async (req, res) => {
   try {
-    const { userId } = req.query;
+    const userId = req.query.userId;
 
     if (!userId) {
       return res.status(400).json({ error: "Missing userId" });
@@ -68,7 +68,7 @@ exports.getBinanceStatus = async (req, res) => {
 
     res.json({ connected: true });
   } catch (err) {
-    console.error("Binance status check error:", err);
+    console.error("Error in getBinanceStatus:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 };
@@ -87,24 +87,6 @@ exports.disconnectBinance = async (req, res) => {
     res.status(200).json({ message: "Binance disconnected" });
   } catch (err) {
     console.error("Error disconnecting Binance:", err);
-    res.status(500).json({ error: "Internal server error" });
-  }
-};
-
-exports.debugUser = async (req, res) => {
-  try {
-    const userId = req.query.userId;
-    const user = await User.findOne({ userId });
-
-    if (!user) return res.status(404).json({ error: "User not found" });
-
-    res.json({
-      binanceApiKeyExists: !!user.binanceApiKey,
-      binanceApiSecretExists: !!user.binanceApiSecret,
-      binanceApiKeyPreview: user.binanceApiKey?.slice(0, 8) + "...", // optional
-    });
-  } catch (err) {
-    console.error("Error in debug-user route:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 };
