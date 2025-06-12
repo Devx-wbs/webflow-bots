@@ -15,6 +15,6 @@ router.post("/disconnect", disconnectBinance);
 router.get("/wallet", getWalletInfo);
 router.get("/trades", getTradeHistory);
 router.get("/stats", getBinanceStats);
-router.get("/enhanced-wallet", getEnhancedWallet);
+router.get("/wallet/enhanced", getEnhancedWallet);
 
 module.exports = router;
