@@ -15,17 +15,15 @@ exports.connectBinance = async (req, res) => {
       return res.status(400).json({ success: false, error: "Missing fields" });
     }
 
-    // Verify credentials
     const timestamp = Date.now();
     const query = `timestamp=${timestamp}`;
     const signature = signQuery(query, apiSecret);
 
-    const test = await axios.get(
+    await axios.get(
       `https://api.binance.com/api/v3/account?${query}&signature=${signature}`,
       { headers: { "X-MBX-APIKEY": apiKey } }
     );
 
-    // Save encrypted keys
     const encryptedKey = encrypt(apiKey);
     const encryptedSecret = encrypt(apiSecret);
 
@@ -44,7 +42,7 @@ exports.connectBinance = async (req, res) => {
   }
 };
 
-// ✅ Check if Binance is connected
+// ✅ Get Binance Connection Status
 exports.getBinanceStatus = async (req, res) => {
   try {
     const { userId } = req.query;
@@ -80,10 +78,15 @@ exports.disconnectBinance = async (req, res) => {
   }
 };
 
-// ✅ Wallet info
-exports.getWalletInfo = async (req, res) => {
+// ✅ Full Wallet Route: balances, USD total, trends, sorting
+exports.getFullWalletInfo = async (req, res) => {
   try {
-    const { userId } = req.query;
+    const {
+      userId,
+      sort = "value",
+      order = "desc",
+      timeframe = "7d",
+    } = req.query;
     if (!userId) return res.status(400).json({ error: "Missing userId" });
 
     const user = await User.findOne({ userId });
@@ -93,6 +96,7 @@ exports.getWalletInfo = async (req, res) => {
 
     const apiKey = decrypt(user.binanceApiKey);
     const apiSecret = decrypt(user.binanceApiSecret);
+
     const timestamp = Date.now();
     const query = `timestamp=${timestamp}`;
     const signature = signQuery(query, apiSecret);
@@ -102,7 +106,7 @@ exports.getWalletInfo = async (req, res) => {
       { headers: { "X-MBX-APIKEY": apiKey } }
     );
 
-    const balances = accountRes.data.balances
+    let balances = accountRes.data.balances
       .filter((b) => parseFloat(b.free) > 0 || parseFloat(b.locked) > 0)
       .map((b) => ({
         asset: b.asset,
@@ -110,14 +114,82 @@ exports.getWalletInfo = async (req, res) => {
         locked: parseFloat(b.locked),
       }));
 
-    return res.json({ balances });
+    const symbols = balances.map((b) => b.asset + "USDT");
+    const priceRes = await axios.get(
+      "https://api.binance.com/api/v3/ticker/price"
+    );
+    const priceMap = Object.fromEntries(
+      priceRes.data.map((p) => [p.symbol, parseFloat(p.price)])
+    );
+
+    const now = Date.now();
+    const startTimestamps = {
+      "1d": now - 1 * 24 * 60 * 60 * 1000,
+      "7d": now - 7 * 24 * 60 * 60 * 1000,
+      "30d": now - 30 * 24 * 60 * 60 * 1000,
+      "180d": now - 180 * 24 * 60 * 60 * 1000,
+      "360d": now - 360 * 24 * 60 * 60 * 1000,
+    };
+    const fromTime =
+      isNaN(Date.parse(timeframe)) && startTimestamps[timeframe]
+        ? startTimestamps[timeframe]
+        : new Date(timeframe).getTime(); // custom
+
+    const walletDetails = await Promise.all(
+      balances.map(async (b) => {
+        const symbol = b.asset + "USDT";
+        const currentPrice = priceMap[symbol] || 0;
+        const total = (b.free + b.locked) * currentPrice;
+
+        let change = 0;
+        try {
+          const klineQuery = `symbol=${symbol}&interval=1d&limit=1&startTime=${fromTime}`;
+          const klineRes = await axios.get(
+            `https://api.binance.com/api/v3/klines?${klineQuery}`
+          );
+          const [open] = klineRes.data?.[0] || [];
+          const pastPrice = parseFloat(open);
+          if (pastPrice) {
+            change = ((currentPrice - pastPrice) / pastPrice) * 100;
+          }
+        } catch (_) {
+          change = 0;
+        }
+
+        return {
+          asset: b.asset,
+          free: b.free,
+          locked: b.locked,
+          total,
+          price: currentPrice,
+          trend: change.toFixed(2),
+        };
+      })
+    );
+
+    const totalWalletUSD = walletDetails.reduce((sum, a) => sum + a.total, 0);
+
+    walletDetails.sort((a, b) => {
+      if (sort === "asset") {
+        return order === "asc"
+          ? a.asset.localeCompare(b.asset)
+          : b.asset.localeCompare(a.asset);
+      } else {
+        return order === "asc" ? a[sort] - b[sort] : b[sort] - a[sort];
+      }
+    });
+
+    return res.json({
+      totalUSD: totalWalletUSD.toFixed(2),
+      assets: walletDetails,
+    });
   } catch (err) {
-    console.error("Wallet error:", err?.response?.data || err.message);
-    return res.status(500).json({ error: "Failed to fetch wallet info" });
+    console.error("Full wallet error:", err?.response?.data || err.message);
+    return res.status(500).json({ error: "Failed to fetch wallet" });
   }
 };
 
-// ✅ Basic trade history (last 10)
+// ✅ Trade History (last 10)
 exports.getTradeHistory = async (req, res) => {
   try {
     const { userId, symbol = "BTCUSDT" } = req.query;
@@ -146,6 +218,7 @@ exports.getTradeHistory = async (req, res) => {
   }
 };
 
+// ✅ Trading Stats
 exports.getBinanceStats = async (req, res) => {
   try {
     const { userId, symbol = "BTCUSDT" } = req.query;
@@ -190,72 +263,5 @@ exports.getBinanceStats = async (req, res) => {
   } catch (err) {
     console.error("Stats error:", err?.response?.data || err.message);
     return res.status(500).json({ error: "Failed to fetch trading stats" });
-  }
-};
-
-exports.getEnhancedWallet = async (req, res) => {
-  try {
-    const { userId, sortBy = "usdValue", order = "desc" } = req.query;
-    if (!userId) return res.status(400).json({ error: "Missing userId" });
-
-    const user = await User.findOne({ userId });
-    if (!user?.binanceApiKey || !user?.binanceApiSecret) {
-      return res.status(403).json({ error: "Binance not connected" });
-    }
-
-    const apiKey = decrypt(user.binanceApiKey);
-    const apiSecret = decrypt(user.binanceApiSecret);
-    const timestamp = Date.now();
-    const query = `timestamp=${timestamp}`;
-    const signature = crypto
-      .createHmac("sha256", apiSecret)
-      .update(query)
-      .digest("hex");
-
-    const accountRes = await axios.get(
-      `https://api.binance.com/api/v3/account?${query}&signature=${signature}`,
-      { headers: { "X-MBX-APIKEY": apiKey } }
-    );
-
-    const balances = accountRes.data.balances.filter(
-      (b) => parseFloat(b.free) > 0 || parseFloat(b.locked) > 0
-    );
-
-    const priceRes = await axios.get(
-      "https://api.binance.com/api/v3/ticker/price"
-    );
-    const prices = Object.fromEntries(
-      priceRes.data.map((p) => [p.symbol, parseFloat(p.price)])
-    );
-
-    const wallet = [];
-    let totalUsd = 0;
-
-    for (const b of balances) {
-      const asset = b.asset;
-      const total = parseFloat(b.free) + parseFloat(b.locked);
-      const symbol = asset === "USDT" ? "USDT" : `${asset}USDT`;
-      const usdPrice = prices[symbol] || 0;
-      const usdValue = total * usdPrice;
-
-      wallet.push({ asset, total, usdPrice, usdValue });
-      totalUsd += usdValue;
-    }
-
-    wallet.sort((a, b) => {
-      if (sortBy === "asset") return a.asset.localeCompare(b.asset);
-      if (sortBy === "usdValue")
-        return order === "asc"
-          ? a.usdValue - b.usdValue
-          : b.usdValue - a.usdValue;
-      return 0;
-    });
-
-    return res.json({ totalUsd: totalUsd.toFixed(2), assets: wallet });
-  } catch (err) {
-    console.error("Enhanced wallet error:", err?.response?.data || err.message);
-    return res
-      .status(500)
-      .json({ error: "Failed to fetch enhanced wallet info" });
   }
 };
