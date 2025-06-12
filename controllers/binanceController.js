@@ -145,3 +145,50 @@ exports.getTradeHistory = async (req, res) => {
     return res.status(500).json({ error: "Failed to fetch trade history" });
   }
 };
+
+exports.getBinanceStats = async (req, res) => {
+  try {
+    const { userId, symbol = "BTCUSDT" } = req.query;
+    const user = await User.findOne({ userId });
+    if (!user?.binanceApiKey || !user?.binanceApiSecret) {
+      return res.status(403).json({ error: "Binance not connected" });
+    }
+
+    const apiKey = decrypt(user.binanceApiKey);
+    const apiSecret = decrypt(user.binanceApiSecret);
+    const timestamp = Date.now();
+    const query = `symbol=${symbol}&limit=50&timestamp=${timestamp}`;
+    const signature = signQuery(query, apiSecret);
+
+    const response = await axios.get(
+      `https://api.binance.com/api/v3/myTrades?${query}&signature=${signature}`,
+      { headers: { "X-MBX-APIKEY": apiKey } }
+    );
+
+    const trades = response.data || [];
+    const buyTrades = trades.filter((t) => t.isBuyer);
+    const totalBuyQty = buyTrades.reduce(
+      (sum, t) => sum + parseFloat(t.qty),
+      0
+    );
+    const totalBuyQuote = buyTrades.reduce(
+      (sum, t) => sum + parseFloat(t.quoteQty),
+      0
+    );
+    const avgBuyPrice = totalBuyQuote / totalBuyQty || 0;
+
+    res.json({
+      tradingStats: {
+        symbol,
+        totalTrades: trades.length,
+        totalBuyQty,
+        totalBuyQuote,
+        avgBuyPrice,
+        lastTradeTime: trades.at(-1)?.time,
+      },
+    });
+  } catch (err) {
+    console.error("Stats error:", err?.response?.data || err.message);
+    return res.status(500).json({ error: "Failed to fetch trading stats" });
+  }
+};
