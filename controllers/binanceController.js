@@ -192,3 +192,70 @@ exports.getBinanceStats = async (req, res) => {
     return res.status(500).json({ error: "Failed to fetch trading stats" });
   }
 };
+
+exports.getEnhancedWallet = async (req, res) => {
+  try {
+    const { userId, sortBy = "usdValue", order = "desc" } = req.query;
+    if (!userId) return res.status(400).json({ error: "Missing userId" });
+
+    const user = await User.findOne({ userId });
+    if (!user?.binanceApiKey || !user?.binanceApiSecret) {
+      return res.status(403).json({ error: "Binance not connected" });
+    }
+
+    const apiKey = decrypt(user.binanceApiKey);
+    const apiSecret = decrypt(user.binanceApiSecret);
+    const timestamp = Date.now();
+    const query = `timestamp=${timestamp}`;
+    const signature = crypto
+      .createHmac("sha256", apiSecret)
+      .update(query)
+      .digest("hex");
+
+    const accountRes = await axios.get(
+      `https://api.binance.com/api/v3/account?${query}&signature=${signature}`,
+      { headers: { "X-MBX-APIKEY": apiKey } }
+    );
+
+    const balances = accountRes.data.balances.filter(
+      (b) => parseFloat(b.free) > 0 || parseFloat(b.locked) > 0
+    );
+
+    const priceRes = await axios.get(
+      "https://api.binance.com/api/v3/ticker/price"
+    );
+    const prices = Object.fromEntries(
+      priceRes.data.map((p) => [p.symbol, parseFloat(p.price)])
+    );
+
+    const wallet = [];
+    let totalUsd = 0;
+
+    for (const b of balances) {
+      const asset = b.asset;
+      const total = parseFloat(b.free) + parseFloat(b.locked);
+      const symbol = asset === "USDT" ? "USDT" : `${asset}USDT`;
+      const usdPrice = prices[symbol] || 0;
+      const usdValue = total * usdPrice;
+
+      wallet.push({ asset, total, usdPrice, usdValue });
+      totalUsd += usdValue;
+    }
+
+    wallet.sort((a, b) => {
+      if (sortBy === "asset") return a.asset.localeCompare(b.asset);
+      if (sortBy === "usdValue")
+        return order === "asc"
+          ? a.usdValue - b.usdValue
+          : b.usdValue - a.usdValue;
+      return 0;
+    });
+
+    return res.json({ totalUsd: totalUsd.toFixed(2), assets: wallet });
+  } catch (err) {
+    console.error("Enhanced wallet error:", err?.response?.data || err.message);
+    return res
+      .status(500)
+      .json({ error: "Failed to fetch enhanced wallet info" });
+  }
+};
