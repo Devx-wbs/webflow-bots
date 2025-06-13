@@ -78,7 +78,6 @@ exports.disconnectBinance = async (req, res) => {
   }
 };
 
-// ✅ Full Wallet Route: balances, USD total, trends, sorting
 exports.getFullWalletInfo = async (req, res) => {
   try {
     const {
@@ -169,19 +168,56 @@ exports.getFullWalletInfo = async (req, res) => {
 
     const totalWalletUSD = walletDetails.reduce((sum, a) => sum + a.total, 0);
 
-    walletDetails.sort((a, b) => {
-      if (sort === "asset") {
-        return order === "asc"
-          ? a.asset.localeCompare(b.asset)
-          : b.asset.localeCompare(a.asset);
-      } else {
-        return order === "asc" ? a[sort] - b[sort] : b[sort] - a[sort];
+    // Sort assets by total USD value descending for response
+    walletDetails.sort((a, b) => b.total - a.total);
+
+    // ➕ Only top 5 assets for historical chart
+    const top5 = walletDetails.slice(0, 5);
+    const limit = 30;
+    const trendData = [];
+
+    for (let i = limit - 1; i >= 0; i--) {
+      const dayTimestamp = now - i * 24 * 60 * 60 * 1000;
+      let dailyTotal = 0;
+
+      for (const asset of top5) {
+        const symbol = asset.asset + "USDT";
+        try {
+          const klineRes = await axios.get(
+            `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1d&limit=1&startTime=${dayTimestamp}`
+          );
+          const [open] = klineRes.data?.[0] || [];
+          const priceAtDay = parseFloat(open);
+          const units = asset.free + asset.locked;
+          dailyTotal += units * priceAtDay;
+        } catch (_) {
+          continue;
+        }
       }
-    });
+
+      trendData.push({
+        time: new Date(dayTimestamp).toISOString().split("T")[0],
+        value: parseFloat(dailyTotal.toFixed(2)),
+      });
+    }
+
+    // Apply sorting after trend extraction (client-side sorting preserved)
+    if (sort === "asset") {
+      walletDetails.sort((a, b) =>
+        order === "asc"
+          ? a.asset.localeCompare(b.asset)
+          : b.asset.localeCompare(a.asset)
+      );
+    } else {
+      walletDetails.sort((a, b) =>
+        order === "asc" ? a[sort] - b[sort] : b[sort] - a[sort]
+      );
+    }
 
     return res.json({
       totalUSD: totalWalletUSD.toFixed(2),
       assets: walletDetails,
+      trendData,
     });
   } catch (err) {
     console.error("Full wallet error:", err?.response?.data || err.message);
