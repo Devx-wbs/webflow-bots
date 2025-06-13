@@ -1,7 +1,8 @@
 let allCoins = [];
 let currentChart = null;
 let chartType = "line";
-let autoRefreshTimer = null;
+let refreshInterval;
+let currentId = "bitcoin";
 
 async function fetchCoins() {
   const res = await fetch("https://api.coingecko.com/api/v3/coins/list");
@@ -24,22 +25,21 @@ function formatPrice(price) {
   return `$${price.toFixed(6)}`;
 }
 
-async function fetchChartData(id, days = 1) {
-  const res = await fetch(
-    `https://api.coingecko.com/api/v3/coins/${id}/market_chart?vs_currency=usd&days=${days}`
-  );
+async function fetchChartData(id, days) {
+  const url = `https://api.coingecko.com/api/v3/coins/${id}/market_chart?vs_currency=usd&days=${days}`;
+  const res = await fetch(url);
   return await res.json();
 }
 
 async function loadChart(id, days = 1, type = "line", showVolume = true) {
   const ctx = document.getElementById("chart").getContext("2d");
-  const data = await fetchChartData(id, days);
+  const chartData = await fetchChartData(id, days);
+
+  const labels = chartData.prices.map((p) => new Date(p[0]).toLocaleString());
+  const prices = chartData.prices.map((p) => p[1]);
+  const volumes = chartData.total_volumes.map((v) => v[1]);
 
   if (currentChart) currentChart.destroy();
-
-  const labels = data.prices.map((p) => new Date(p[0]).toLocaleDateString());
-  const prices = data.prices.map((p) => p[1]);
-  const volumes = data.total_volumes.map((v) => v[1]);
 
   if (type === "line") {
     currentChart = new Chart(ctx, {
@@ -50,7 +50,7 @@ async function loadChart(id, days = 1, type = "line", showVolume = true) {
           {
             label: "Price",
             data: prices,
-            borderColor: "#3e95cd",
+            borderColor: "deepskyblue",
             fill: false,
           },
           ...(showVolume
@@ -58,39 +58,30 @@ async function loadChart(id, days = 1, type = "line", showVolume = true) {
                 {
                   label: "Volume",
                   data: volumes,
-                  yAxisID: "volume",
-                  borderColor: "rgba(0,255,0,0.5)",
-                  backgroundColor: "rgba(0,255,0,0.2)",
                   type: "bar",
+                  yAxisID: "volume",
+                  backgroundColor: "rgba(0,255,0,0.3)",
                 },
               ]
             : []),
         ],
       },
       options: {
-        responsive: true,
         scales: {
-          y: {
-            beginAtZero: false,
+          volume: {
+            position: "right",
+            beginAtZero: true,
+            grid: { display: false },
           },
-          ...(showVolume
-            ? {
-                volume: {
-                  position: "right",
-                  beginAtZero: true,
-                  grid: { display: false },
-                },
-              }
-            : {}),
         },
       },
     });
   } else {
-    const candles = data.prices.map((p, i) => ({
+    const candles = chartData.prices.map((p, i) => ({
       x: new Date(p[0]),
-      o: prices[i],
-      h: prices[i] + Math.random() * 2,
-      l: prices[i] - Math.random() * 2,
+      o: prices[i] - 1,
+      h: prices[i] + 2,
+      l: prices[i] - 2,
       c: prices[i],
     }));
 
@@ -101,12 +92,12 @@ async function loadChart(id, days = 1, type = "line", showVolume = true) {
           {
             label: "Candlestick",
             data: candles,
-            borderColor: "#00ff00",
           },
         ],
       },
       options: {
         responsive: true,
+        maintainAspectRatio: false,
       },
     });
   }
@@ -115,74 +106,80 @@ async function loadChart(id, days = 1, type = "line", showVolume = true) {
 async function updateCoinInfo(id) {
   const res = await fetch(`https://api.coingecko.com/api/v3/coins/${id}`);
   const data = await res.json();
-  const infoDiv = document.getElementById("coin-info");
   const price = data.market_data.current_price.usd;
   const change = data.market_data.price_change_percentage_24h;
   const arrow = change >= 0 ? "▲" : "▼";
   const color = change >= 0 ? "limegreen" : "red";
-  infoDiv.innerHTML = `
+
+  document.getElementById("coin-info").innerHTML = `
     <h3>${data.name} (${data.symbol.toUpperCase()})</h3>
-    <p>Price: ${formatPrice(price)}</p>
-    <p style="color:${color};">24h Change: ${change.toFixed(2)}% ${arrow}</p>
+    <p>💵 Price: ${formatPrice(price)}</p>
+    <p style="color:${color}">24h Change: ${change.toFixed(2)}% ${arrow}</p>
   `;
 }
 
+async function refreshData(id, days, type, showVolume) {
+  await updateCoinInfo(id);
+  await loadChart(id, days, type, showVolume);
+}
+
 async function initMarketWidget() {
-  await fetchCoins();
+  try {
+    await fetchCoins();
+    const select = document.getElementById("coin-select");
+    const input = document.getElementById("coin-search");
+    const toggleBtn = document.getElementById("toggle-chart");
+    const timeframe = document.getElementById("timeframe-select");
+    const volumeToggle = document.getElementById("volume-toggle");
 
-  const select = document.getElementById("coin-select");
-  const input = document.getElementById("coin-search");
-  const toggleBtn = document.getElementById("toggle-chart");
-  const timeframe = document.getElementById("timeframe-select");
-  const volumeToggle = document.getElementById("volume-toggle");
+    const renderOptions = (coins) => {
+      select.innerHTML = coins
+        .map(
+          (c) =>
+            `<option value="${c.id}">${
+              c.name
+            } (${c.symbol.toUpperCase()})</option>`
+        )
+        .join("");
+    };
 
-  const renderOptions = (coins) => {
-    select.innerHTML = coins
-      .map(
-        (c) =>
-          `<option value="${c.id}">${
-            c.name
-          } (${c.symbol.toUpperCase()})</option>`
-      )
-      .join("");
-  };
+    input.addEventListener("input", () => {
+      const filtered = filterCoins(input.value);
+      renderOptions(filtered);
+    });
 
-  input.addEventListener("input", () => {
-    const filtered = filterCoins(input.value);
-    renderOptions(filtered);
-  });
+    select.addEventListener("change", () => {
+      currentId = select.value;
+      refreshData(currentId, timeframe.value, chartType, volumeToggle.checked);
+    });
 
-  let currentId = "bitcoin";
-  renderOptions(filterCoins(""));
+    toggleBtn.addEventListener("click", () => {
+      chartType = chartType === "line" ? "candlestick" : "line";
+      toggleBtn.innerText =
+        chartType === "line" ? "Switch to Candle" : "Switch to Line";
+      refreshData(currentId, timeframe.value, chartType, volumeToggle.checked);
+    });
 
-  async function refresh() {
-    await updateCoinInfo(currentId);
-    await loadChart(
-      currentId,
-      timeframe.value,
-      chartType,
-      volumeToggle.checked
-    );
+    timeframe.addEventListener("change", () => {
+      refreshData(currentId, timeframe.value, chartType, volumeToggle.checked);
+    });
+
+    volumeToggle.addEventListener("change", () => {
+      refreshData(currentId, timeframe.value, chartType, volumeToggle.checked);
+    });
+
+    // Load default chart
+    renderOptions(allCoins);
+    refreshData(currentId, timeframe.value, chartType, volumeToggle.checked);
+
+    // Auto Refresh
+    if (refreshInterval) clearInterval(refreshInterval);
+    refreshInterval = setInterval(() => {
+      refreshData(currentId, timeframe.value, chartType, volumeToggle.checked);
+    }, 30000);
+  } catch (err) {
+    console.error("Widget init failed:", err);
   }
-
-  select.addEventListener("change", async () => {
-    currentId = select.value;
-    await refresh();
-  });
-
-  toggleBtn.addEventListener("click", async () => {
-    chartType = chartType === "line" ? "candlestick" : "line";
-    toggleBtn.textContent =
-      chartType === "line" ? "Switch to Candle" : "Switch to Line";
-    await refresh();
-  });
-
-  timeframe.addEventListener("change", refresh);
-  volumeToggle.addEventListener("change", refresh);
-
-  await refresh();
-
-  autoRefreshTimer = setInterval(refresh, 30000); // 30s
 }
 
 window.addEventListener("DOMContentLoaded", initMarketWidget);
