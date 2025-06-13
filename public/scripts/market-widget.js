@@ -1,184 +1,151 @@
 let allCoins = [];
 let currentChart = null;
-let chartType = "line";
+let chartMode = "line";
 let refreshInterval;
 let currentId = "bitcoin";
 
-async function fetchCoins() {
-  const res = await fetch("https://api.coingecko.com/api/v3/coins/list");
-  const coins = await res.json();
-  allCoins = coins.filter((c) => c.symbol.length <= 6);
-  return allCoins;
-}
-
-function filterCoins(query) {
-  return allCoins.filter(
-    (c) =>
-      c.symbol.toLowerCase().includes(query.toLowerCase()) ||
-      c.name.toLowerCase().includes(query.toLowerCase())
+async function fetchMajorCoins() {
+  const res = await fetch(
+    "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50"
   );
+  return await res.json();
 }
 
-function formatPrice(price) {
-  if (price > 1) return `$${price.toFixed(2)}`;
-  if (price > 0.01) return `$${price.toFixed(4)}`;
-  return `$${price.toFixed(6)}`;
+function formatPrice(p) {
+  if (p > 1) return `$${p.toFixed(2)}`;
+  if (p > 0.01) return `$${p.toFixed(4)}`;
+  return `$${p.toFixed(6)}`;
 }
 
 async function fetchChartData(id, days) {
   const url = `https://api.coingecko.com/api/v3/coins/${id}/market_chart?vs_currency=usd&days=${days}`;
-  const res = await fetch(url);
-  return await res.json();
+  return await (await fetch(url)).json();
 }
 
-async function loadChart(id, days = 1, type = "line", showVolume = true) {
-  const ctx = document.getElementById("chart").getContext("2d");
-  const chartData = await fetchChartData(id, days);
+function prepareCandleData(prices) {
+  return prices.map((p) => ({
+    x: p[0],
+    o: p[1],
+    h: p[2],
+    l: p[3],
+    c: p[4],
+  }));
+}
 
-  const labels = chartData.prices.map((p) => new Date(p[0]).toLocaleString());
-  const prices = chartData.prices.map((p) => p[1]);
-  const volumes = chartData.total_volumes.map((v) => v[1]);
+async function drawChart(id, days, type, showVolume) {
+  const data = await fetchChartData(id, days);
+  const ctx = document.getElementById("chart").getContext("2d");
+
+  const labels = data.prices.map((p) => new Date(p[0]).toLocaleString());
+  const priceData = data.prices.map((p) => p[1]);
+  const volumeData = data.total_volumes.map((v) => v[1]);
 
   if (currentChart) currentChart.destroy();
 
+  const datasets = [];
+
   if (type === "line") {
-    currentChart = new Chart(ctx, {
-      type: "line",
-      data: {
-        labels,
-        datasets: [
-          {
-            label: "Price",
-            data: prices,
-            borderColor: "deepskyblue",
-            fill: false,
-          },
-          ...(showVolume
-            ? [
-                {
-                  label: "Volume",
-                  data: volumes,
-                  type: "bar",
-                  yAxisID: "volume",
-                  backgroundColor: "rgba(0,255,0,0.3)",
-                },
-              ]
-            : []),
-        ],
-      },
-      options: {
-        scales: {
-          volume: {
-            position: "right",
-            beginAtZero: true,
-            grid: { display: false },
-          },
-        },
-      },
+    datasets.push({
+      label: "Price",
+      data: priceData,
+      borderColor: "#4677f5",
+      fill: false,
     });
   } else {
-    const candles = chartData.prices.map((p, i) => ({
-      x: new Date(p[0]),
-      o: prices[i] - 1,
-      h: prices[i] + 2,
-      l: prices[i] - 2,
-      c: prices[i],
-    }));
-
-    currentChart = new Chart(ctx, {
+    datasets.push({
+      label: "Candlestick",
+      data: prepareCandleData(data.prices),
       type: "candlestick",
-      data: {
-        datasets: [
-          {
-            label: "Candlestick",
-            data: candles,
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-      },
     });
   }
+
+  if (showVolume) {
+    datasets.push({
+      label: "Volume",
+      data: volumeData,
+      type: "bar",
+      yAxisID: "vol",
+      backgroundColor: "rgba(0,150,136,0.3)",
+    });
+  }
+
+  currentChart = new Chart(ctx, {
+    type: type === "line" ? "line" : "bar",
+    data: { labels, datasets },
+    options: {
+      scales: {
+        x: { ticks: { color: "#333" } },
+        y: { display: true },
+        vol: { display: showVolume, position: "right", beginAtZero: true },
+      },
+      plugins: { legend: { display: true } },
+      responsive: true,
+    },
+  });
 }
 
 async function updateCoinInfo(id) {
   const res = await fetch(`https://api.coingecko.com/api/v3/coins/${id}`);
-  const data = await res.json();
-  const price = data.market_data.current_price.usd;
-  const change = data.market_data.price_change_percentage_24h;
-  const arrow = change >= 0 ? "▲" : "▼";
-  const color = change >= 0 ? "limegreen" : "red";
-
+  const d = await res.json();
+  const p = d.market_data.current_price.usd;
+  const c = d.market_data.price_change_percentage_24h;
+  const sign = c >= 0 ? "▲" : "▼";
   document.getElementById("coin-info").innerHTML = `
-    <h3>${data.name} (${data.symbol.toUpperCase()})</h3>
-    <p>💵 Price: ${formatPrice(price)}</p>
-    <p style="color:${color}">24h Change: ${change.toFixed(2)}% ${arrow}</p>
+    <strong>${d.name} (${d.symbol.toUpperCase()})</strong><br>
+    Price: ${formatPrice(p)} • <span style="color:${
+    c >= 0 ? "green" : "red"
+  }">${c.toFixed(2)}% ${sign}</span>
   `;
 }
 
-async function refreshData(id, days, type, showVolume) {
-  await updateCoinInfo(id);
-  await loadChart(id, days, type, showVolume);
+async function refreshAll() {
+  await updateCoinInfo(currentId);
+  await drawChart(
+    currentId,
+    document.getElementById("timeframe-select").value,
+    chartMode,
+    document.getElementById("volume-toggle").checked
+  );
 }
 
 async function initMarketWidget() {
   try {
-    await fetchCoins();
-    const select = document.getElementById("coin-select");
-    const input = document.getElementById("coin-search");
-    const toggleBtn = document.getElementById("toggle-chart");
-    const timeframe = document.getElementById("timeframe-select");
-    const volumeToggle = document.getElementById("volume-toggle");
+    const major = await fetchMajorCoins();
+    allCoins = major.map((c) => ({ id: c.id, symbol: c.symbol, name: c.name }));
 
-    const renderOptions = (coins) => {
-      select.innerHTML = coins
-        .map(
-          (c) =>
-            `<option value="${c.id}">${
-              c.name
-            } (${c.symbol.toUpperCase()})</option>`
-        )
-        .join("");
-    };
+    const sel = document.getElementById("coin-select");
+    sel.innerHTML = allCoins
+      .map(
+        (c) =>
+          `<option value="${c.id}">${
+            c.name
+          } (${c.symbol.toUpperCase()})</option>`
+      )
+      .join("");
+    sel.value = currentId;
 
-    input.addEventListener("input", () => {
-      const filtered = filterCoins(input.value);
-      renderOptions(filtered);
+    sel.addEventListener("change", () => {
+      currentId = sel.value;
+      refreshAll();
     });
-
-    select.addEventListener("change", () => {
-      currentId = select.value;
-      refreshData(currentId, timeframe.value, chartType, volumeToggle.checked);
+    document.getElementById("toggle-chart").addEventListener("click", () => {
+      chartMode = chartMode === "line" ? "candlestick" : "line";
+      document.getElementById("toggle-chart").innerText =
+        chartMode === "line" ? "Switch to Candle" : "Switch to Line";
+      refreshAll();
     });
+    document
+      .getElementById("timeframe-select")
+      .addEventListener("change", refreshAll);
+    document
+      .getElementById("volume-toggle")
+      .addEventListener("change", refreshAll);
 
-    toggleBtn.addEventListener("click", () => {
-      chartType = chartType === "line" ? "candlestick" : "line";
-      toggleBtn.innerText =
-        chartType === "line" ? "Switch to Candle" : "Switch to Line";
-      refreshData(currentId, timeframe.value, chartType, volumeToggle.checked);
-    });
+    await refreshAll();
 
-    timeframe.addEventListener("change", () => {
-      refreshData(currentId, timeframe.value, chartType, volumeToggle.checked);
-    });
-
-    volumeToggle.addEventListener("change", () => {
-      refreshData(currentId, timeframe.value, chartType, volumeToggle.checked);
-    });
-
-    // Load default chart
-    renderOptions(allCoins);
-    refreshData(currentId, timeframe.value, chartType, volumeToggle.checked);
-
-    // Auto Refresh
-    if (refreshInterval) clearInterval(refreshInterval);
-    refreshInterval = setInterval(() => {
-      refreshData(currentId, timeframe.value, chartType, volumeToggle.checked);
-    }, 30000);
-  } catch (err) {
-    console.error("Widget init failed:", err);
+    refreshInterval = setInterval(refreshAll, 30000);
+  } catch (e) {
+    console.error("Market widget init failed:", e);
   }
 }
 
