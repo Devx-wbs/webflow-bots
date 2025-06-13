@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
+const path = require("path");
 require("dotenv").config();
 
 const app = express();
@@ -13,6 +14,7 @@ const botRoutes = require("./routes/botRoutes");
 
 app.use("/api/binance", binanceRoutes);
 app.use("/api/bots", botRoutes);
+app.use("/scripts", express.static(path.join(__dirname, "public/scripts")));
 
 // MongoDB connection
 mongoose
