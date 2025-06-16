@@ -45,4 +45,14 @@ API.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-module.exports = API;
+async function fetchFrom3Commas(method, path, data = {}) {
+  if (method.toLowerCase() === "get") {
+    return API.get(path);
+  } else if (method.toLowerCase() === "post") {
+    return API.post(path, data);
+  } else if (method.toLowerCase() === "delete") {
+    return API.delete(path);
+  }
+}
+
+module.exports = { fetchFrom3Commas };
