@@ -1,8 +1,8 @@
 const crypto = require("crypto");
 const axios = require("axios");
 
-const API_KEY = process.env.THREE_COMMAS_API_KEY;
-const API_SECRET = process.env.THREE_COMMAS_API_SECRET;
+const API_KEY = process.env.API_KEY;
+const API_SECRET = process.env.API_SECRET;
 const BASE_API = "https://api.3commas.io/public/api/ver1";
 
 // HMAC-SHA256 helper

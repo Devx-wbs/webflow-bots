@@ -7,8 +7,9 @@ exports.listBots = async (req, res) => {
     return res.status(400).json({ error: "UserId is required" });
   }
 
+  // Ideally, validate userId against your own DB first.
+
   try {
-    // Ideally you'd validate this userId first to match API credentials.
     const response = await fetchFrom3Commas("get", "/bots");
 
     res.json(response.data);
