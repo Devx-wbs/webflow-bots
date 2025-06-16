@@ -1,6 +1,5 @@
-const api = require("../utils/threeCommas");
+const { fetchFrom3Commas } = require("../utils/threeCommas");
 
-// List all bots for a particular user
 exports.listBots = async (req, res) => {
   const { userId } = req.query;
 
@@ -8,10 +7,10 @@ exports.listBots = async (req, res) => {
     return res.status(400).json({ error: "UserId is required" });
   }
 
-  // TODO: Validate if the user owns the API credentials
-  // For now we reuse `api` directly. Ideally you'd instate per-user API
   try {
-    const response = await api.get("/bots"); // 3Commas API to list all
+    // Ideally you'd validate this userId first to match API credentials.
+    const response = await fetchFrom3Commas("get", "/bots");
+
     res.json(response.data);
   } catch (err) {
     console.error(err?.response?.data || err?.message);
@@ -27,7 +26,8 @@ exports.activateBot = async (req, res) => {
   }
 
   try {
-    const response = await api.post(`/bots/${botId}/start`); // activate bot
+    const response = await fetchFrom3Commas("post", `/bots/${botId}/start`);
+
     res.json({ message: "Bot activated successfully", data: response.data });
   } catch (err) {
     console.error(err?.response?.data || err?.message);
@@ -43,7 +43,8 @@ exports.stopBot = async (req, res) => {
   }
 
   try {
-    const response = await api.post(`/bots/${botId}/disable`); // deactivate bot
+    const response = await fetchFrom3Commas("post", `/bots/${botId}/disable`);
+
     res.json({ message: "Bot deactivated successfully", data: response.data });
   } catch (err) {
     console.error(err?.response?.data || err?.message);
