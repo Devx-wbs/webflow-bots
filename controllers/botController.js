@@ -1,6 +1,6 @@
 const { fetchFrom3Commas } = require("../utils/threeCommas");
+const Bot = require("../models/Bot");
 const User = require("../models/User");
-const Bot = require("../models/Bots");
 
 exports.createBot = async (req, res) => {
   const {
@@ -43,10 +43,8 @@ exports.createBot = async (req, res) => {
       "/bots/create_bot",
       botPayload
     );
-
     const botData = response.data;
 
-    // Save bot to DB
     await Bot.create({
       userId,
       botId: botData.id,

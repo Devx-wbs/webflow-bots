@@ -28,7 +28,7 @@ function sign(path, body = "") {
   return { timestamp, signature };
 }
 
-const API = axios.create({ baseURL: "https://api.3commas.io/public/api/v1" });
+const API = axios.create({ baseURL: "https://api.3commas.io/public/api/ver1" });
 
 API.interceptors.request.use(
   (config) => {
