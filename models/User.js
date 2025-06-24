@@ -2,9 +2,10 @@ const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema(
   {
-    userId: String, // From Memberstack
+    userId: String, // Memberstack ID
     binanceApiKey: String,
     binanceApiSecret: String,
+    bots: [{ type: mongoose.Schema.Types.ObjectId, ref: "Bot" }], // optional
   },
   { timestamps: true }
 );
