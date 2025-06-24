@@ -10,14 +10,8 @@ app.use(express.json());
 
 // Routes
 const binanceRoutes = require("./routes/binanceRoutes");
-const botRoutes = require("./routes/botRoutes");
-
-const botManagement = require("./routes/botManagementRoute");
-
-app.use("/api/bots/manage", botManagement);
 
 app.use("/api/binance", binanceRoutes);
-app.use("/api/bots", botRoutes);
 app.use("/scripts", express.static(path.join(__dirname, "public/scripts")));
 
 // MongoDB connection
