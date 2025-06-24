@@ -10,9 +10,11 @@ app.use(express.json());
 
 // Routes
 const binanceRoutes = require("./routes/binanceRoutes");
+const botRoutes = require("./routes/botRoutes");
 
 app.use("/api/binance", binanceRoutes);
 app.use("/scripts", express.static(path.join(__dirname, "public/scripts")));
+app.use("/api/bots", botRoutes);
 
 // MongoDB connection
 mongoose
