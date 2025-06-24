@@ -1,6 +1,6 @@
 const { fetchFrom3Commas } = require("../utils/threeCommas");
 const User = require("../models/User");
-const Bot = require("../models/Bot");
+const Bot = require("../models/Bots");
 
 exports.createBot = async (req, res) => {
   const {
