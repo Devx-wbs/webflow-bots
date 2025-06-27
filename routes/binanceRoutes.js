@@ -8,5 +8,6 @@ router.post("/disconnect", controller.disconnectBinance);
 router.get("/wallet", controller.getFullWalletInfo);
 router.get("/trades", controller.getTradeHistory);
 router.get("/stats", controller.getBinanceStats);
+router.get("/wallet/simple", controller.getSimpleWallet);
 
 module.exports = router;

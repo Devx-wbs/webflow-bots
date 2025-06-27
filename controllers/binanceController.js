@@ -301,3 +301,39 @@ exports.getBinanceStats = async (req, res) => {
     return res.status(500).json({ error: "Failed to fetch trading stats" });
   }
 };
+
+exports.getSimpleWallet = async (req, res) => {
+  try {
+    const { userId } = req.query;
+    if (!userId) return res.status(400).json({ error: "Missing userId" });
+
+    const user = await User.findOne({ userId });
+    if (!user?.binanceApiKey || !user?.binanceApiSecret) {
+      return res.status(403).json({ error: "Binance not connected" });
+    }
+
+    const apiKey = decrypt(user.binanceApiKey);
+    const apiSecret = decrypt(user.binanceApiSecret);
+    const timestamp = Date.now();
+    const query = `timestamp=${timestamp}`;
+    const signature = signQuery(query, apiSecret);
+
+    const accountRes = await axios.get(
+      `https://api.binance.com/api/v3/account?${query}&signature=${signature}`,
+      { headers: { "X-MBX-APIKEY": apiKey } }
+    );
+
+    const assets = accountRes.data.balances
+      .filter((b) => parseFloat(b.free) > 0 || parseFloat(b.locked) > 0)
+      .map((b) => ({
+        asset: b.asset,
+        free: parseFloat(b.free),
+        locked: parseFloat(b.locked),
+      }));
+
+    return res.json({ assets });
+  } catch (err) {
+    console.error("Simple wallet error:", err.message);
+    return res.status(500).json({ error: "Failed to fetch wallet" });
+  }
+};
